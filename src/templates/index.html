@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Recommendations</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8">Event Recommendations</h1>
+        
+        <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <form id="recommendationForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Zip Code</label>
+                    <input type="text" id="zipCode" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Interests (comma-separated)</label>
+                    <input type="text" id="interests" required
+                           placeholder="e.g., music, art, sports"
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                </div>
+                
+                <button type="submit"
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                    Get Recommendations
+                </button>
+            </form>
+            
+            <div id="results" class="mt-8 hidden">
+                <h2 class="text-2xl font-semibold mb-4">Your Recommendations</h2>
+                <div id="recommendations" class="prose max-w-none"></div>
+            </div>
+            
+            <div id="loading" class="hidden mt-8 text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('recommendationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const zipCode = document.getElementById('zipCode').value;
+            const interests = document.getElementById('interests').value.split(',').map(i => i.trim());
+            
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('results').classList.add('hidden');
+            
+            try {
+                const response = await fetch('/api/recommendations', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ zip_code: zipCode, interests }),
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('recommendations').innerHTML = data.recommendations.replace(/\n/g, '<br>');
+                    document.getElementById('results').classList.remove('hidden');
+                } else {
+                    alert(data.error || 'An error occurred');
+                }
+            } catch (error) {
+                alert('An error occurred while fetching recommendations');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html> 
