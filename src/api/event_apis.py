@@ -8,8 +8,11 @@ from abc import ABC, abstractmethod
 from dotenv import load_dotenv
 import math
 from geopy.geocoders import Nominatim
+import logging
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate the distance between two points in miles using the Haversine formula."""
@@ -86,8 +89,10 @@ class TicketmasterAPI(EventAPI):
         """Fetch events from Ticketmaster API"""
         try:
             # Get coordinates for the location
+            logger.info(f"Getting coordinates for location: {location}")
             coords = self._get_coordinates(location)
             if not coords:
+                logger.error("Could not get coordinates for location")
                 return []
 
             # Calculate date range (next 30 days)
@@ -106,10 +111,11 @@ class TicketmasterAPI(EventAPI):
                 "sort": "date,asc"
             }
 
-            print(f"Requesting Ticketmaster API with params: {params}")
+            logger.info(f"Requesting Ticketmaster API with params: {params}")
             response = requests.get(self.base_url, params=params)
             response.raise_for_status()
             data = response.json()
+            logger.info("Successfully received response from Ticketmaster API")
 
             events = []
             for event in data.get("_embedded", {}).get("events", []):
@@ -150,18 +156,27 @@ class TicketmasterAPI(EventAPI):
                         events.append(event_obj)
                     else:
                         # Check if event matches any interests
-                        event_text = f"{event_obj.name} {event_obj.description} {' '.join(event_obj.categories)}".lower()
-                        if any(interest.lower() in event_text for interest in interests):
+                        event_name = event_obj.name.lower()
+                        event_description = event_obj.description.lower()
+                        event_categories = [cat.lower() for cat in event_obj.categories]
+                        
+                        if any(
+                            interest.lower() in event_name or
+                            interest.lower() in event_description or
+                            interest.lower() in event_categories
+                            for interest in interests
+                        ):
                             events.append(event_obj)
 
                 except Exception as e:
-                    print(f"Error processing event: {str(e)}")
+                    logger.error(f"Error processing event: {str(e)}")
                     continue
 
+            logger.info(f"Successfully processed {len(events)} events from Ticketmaster")
             return events
 
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching events from Ticketmaster: {str(e)}")
+            logger.error(f"Error fetching events from Ticketmaster: {str(e)}")
             return []
 
 # Bandsintown API requires a partnership program registration and cannot be used
@@ -293,17 +308,18 @@ class MeetupAPI(EventAPI):
             return []
 
 class SeatGeekAPI(EventAPI):
-    def __init__(self, api_key: str):
+    def __init__(self, api_key):
+        super().__init__("SeatGeek")
         self.api_key = api_key
-        self.base_url = "https://api.seatgeek.com/2"
+        self.base_url = "https://api.seatgeek.com/2/events"
 
-    def fetch_events(self, zip_code: str, interests: List[str]) -> List[Event]:
+    def fetch_events(self, location, interests=None):
         start_date = datetime.now().replace(microsecond=0)
         end_date = start_date + timedelta(days=30)
         
         params = {
             "client_id": self.api_key,
-            "postal_code": zip_code,
+            "postal_code": location,
             "per_page": 100,
             "datetime_local.gte": start_date.isoformat(),
             "datetime_local.lte": end_date.isoformat(),
@@ -311,7 +327,7 @@ class SeatGeekAPI(EventAPI):
         }
         
         try:
-            response = requests.get(f"{self.base_url}/events", params=params)
+            response = requests.get(f"{self.base_url}/search", params=params)
             response.raise_for_status()
             data = response.json()
             
@@ -327,7 +343,7 @@ class SeatGeekAPI(EventAPI):
                         description=event.get("description", ""),
                         date=event.get("datetime_local", ""),
                         location=f"{venue.get('address', '')}, {venue.get('city', '')}",
-                        zip_code=zip_code,
+                        zip_code=location,
                         categories=[cat.get("name", "").lower() for cat in event.get("taxonomies", [])],
                         url=event.get("url", ""),
                         price=price,
@@ -432,15 +448,18 @@ class VividSeatsAPI(EventAPI):
 
 class EventAggregator:
     def __init__(self):
+        logger.info("Initializing EventAggregator")
         # Initialize APIs dictionary with Ticketmaster as the default
         self.apis = {
             "ticketmaster": TicketmasterAPI(os.getenv("TICKETMASTER_API_KEY", ""))
         }
+        logger.info("Initialized Ticketmaster API")
         
         # Add VividSeats API if key is available
         vividseats_key = os.getenv("VIVIDSEATS_API_KEY")
         if vividseats_key and vividseats_key != "your_vividseats_api_key":
             self.apis["vividseats"] = VividSeatsAPI(vividseats_key)
+            logger.info("Initialized VividSeats API")
             
         # Add SeatGeek API if both client ID and secret are available
         seatgeek_client_id = os.getenv("SEATGEEK_CLIENT_ID")
@@ -448,6 +467,9 @@ class EventAggregator:
         if (seatgeek_client_id and seatgeek_client_id != "your_client_id" and 
             seatgeek_client_secret and seatgeek_client_secret != "your_client_secret"):
             self.apis["seatgeek"] = SeatGeekAPI(seatgeek_client_id)
+            logger.info("Initialized SeatGeek API")
+        
+        logger.info(f"Available APIs: {list(self.apis.keys())}")
 
     def get_all_events(self, zip_code: str, interests: List[str]) -> List[Event]:
         """Aggregate events from all available sources"""
@@ -455,20 +477,24 @@ class EventAggregator:
         
         for api_name, api in self.apis.items():
             try:
-                print(f"Fetching events from {api_name}...")
+                logger.info(f"Fetching events from {api_name}...")
                 events = api.fetch_events(zip_code, interests)
-                print(f"Found {len(events)} events from {api_name}")
+                logger.info(f"Found {len(events)} events from {api_name}")
                 all_events.extend(events)
             except Exception as e:
-                print(f"Error fetching events from {api_name}: {e}")
+                logger.error(f"Error fetching events from {api_name}: {e}")
                 continue
         
         # Sort events by date
         all_events.sort(key=lambda x: x.date)
+        logger.info(f"Total events found across all APIs: {len(all_events)}")
         
         return all_events
 
 def get_all_events(zip_code: str, interests: List[str]) -> List[Event]:
     """Get events from all available APIs."""
+    logger.info(f"Getting events for zip code {zip_code} with interests {interests}")
     aggregator = EventAggregator()
-    return aggregator.get_all_events(zip_code, interests) 
+    events = aggregator.get_all_events(zip_code, interests)
+    logger.info(f"Total events found: {len(events)}")
+    return events 

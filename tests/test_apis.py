@@ -1,11 +1,14 @@
-from event_apis import EventAggregator
+from src.api.event_apis import EventAggregator, TicketmasterAPI, MeetupAPI, SeatGeekAPI, VividSeatsAPI
 import os
 from dotenv import load_dotenv
-from event_apis import TicketmasterAPI, EventbriteAPI, MeetupAPI
 from datetime import datetime, timedelta
+import unittest
+from unittest.mock import patch, MagicMock
+import pytest
 
 load_dotenv()
 
+@pytest.mark.parametrize("api_name", ["ticketmaster", "meetup", "seatgeek", "vividseats"])
 def test_api(api_name: str, zip_code: str = "90210", interests: list = ["music"]):
     print(f"\nTesting {api_name} API...")
     aggregator = EventAggregator()
@@ -51,28 +54,6 @@ def test_ticketmaster():
     except Exception as e:
         print(f"Error testing Ticketmaster API: {str(e)}")
 
-def test_eventbrite():
-    print("\nTesting Eventbrite API...")
-    api_key = os.getenv('EVENTBRITE_API_KEY')
-    if not api_key:
-        print("Error: EVENTBRITE_API_KEY not found in environment variables")
-        return
-        
-    api = EventbriteAPI(api_key)
-    try:
-        events = api.fetch_events("90210", ["music", "sports"])
-        print(f"Found {len(events)} events")
-        if events:
-            print("\nFirst event details:")
-            event = events[0]
-            print(f"Name: {event.name}")
-            print(f"Date: {event.date}")
-            print(f"Location: {event.location}")
-            print(f"Price: {event.price}")
-            print(f"URL: {event.url}")
-    except Exception as e:
-        print(f"Error testing Eventbrite API: {str(e)}")
-
 def test_meetup():
     print("\nTesting Meetup API...")
     api_key = os.getenv('MEETUP_API_KEY')
@@ -97,7 +78,7 @@ def test_meetup():
 
 def main():
     # Test each API individually
-    apis = ["eventbrite", "ticketmaster", "bandsintown", "meetup", "seatgeek"]
+    apis = ["ticketmaster", "meetup", "seatgeek", "vividseats"]
     
     for api in apis:
         test_api(api)
@@ -111,5 +92,4 @@ if __name__ == "__main__":
     
     # Test each API
     test_ticketmaster()
-    test_eventbrite()
     test_meetup() 

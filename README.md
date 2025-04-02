@@ -53,6 +53,7 @@ event-recommendation-system/
    SEATGEEK_API_KEY=your_seatgeek_api_key
    MEETUP_API_KEY=your_meetup_api_key
    VIVIDSEATS_API_KEY=your_vividseats_api_key
+   GITHUB_TOKEN=your_github_token
    ```
 
    You can obtain API keys from:
@@ -61,6 +62,7 @@ event-recommendation-system/
    - SeatGeek: https://seatgeek.com/account/develop
    - Meetup: https://www.meetup.com/api/oauth/
    - Vivid Seats: https://skybox.vividseats.com/api-docs/#/
+   - GitHub: https://github.com/settings/tokens (needed for API rate limits)
 
 ## Usage
 
@@ -86,4 +88,4 @@ You can modify the interests list and zip code in the `main()` function of `src/
 
 ## Note
 
-Make sure to keep your API keys secure and never commit them to version control. 
+Make sure to keep your API keys secure and never commit them to version control. The `.env` file is included in `.gitignore` to prevent accidental commits of sensitive data. 

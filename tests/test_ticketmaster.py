@@ -1,8 +1,10 @@
-from event_apis import TicketmasterAPI
+from src.api.event_apis import TicketmasterAPI
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import json
+import unittest
+from unittest.mock import patch, MagicMock
 
 load_dotenv()
 

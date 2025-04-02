@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Union
 from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
 from sentence_transformers import SentenceTransformer
@@ -107,14 +107,33 @@ class VectorEventRecommender:
             Provide a recommendation in the following structured format:
             {format_instructions}
             """),
-            ("human", "{event_text}")
+            ("human", "{event}")
         ])
         
         logger.info("VectorEventRecommender initialized with OpenAI API key")
 
-    def _get_event_text(self, event: Dict[str, Any]) -> str:
+    def _get_event_text(self, event: Union[Event, Dict[str, Any]]) -> str:
         """Format event data for vector search."""
-        return f"{event['title']} {event['description']} {event['categories']} {event['venue']} {event['price']} {event['url']}"
+        if isinstance(event, dict):
+            categories = ', '.join(event.get('categories', []))
+            return f"""Event: {event.get('name', '')}
+Description: {event.get('description', '')}
+Categories: {categories}
+Venue: {event.get('venue', '')}
+Location: {event.get('location', '')}
+Date: {event.get('date', '')}
+Price: {event.get('price', '')}
+URL: {event.get('url', '')}"""
+        else:
+            categories = ', '.join(getattr(event, 'categories', []))
+            return f"""Event: {event.name}
+Description: {event.description}
+Categories: {categories}
+Venue: {getattr(event, 'venue', '')}
+Location: {getattr(event, 'location', '')}
+Date: {str(getattr(event, 'date', ''))}
+Price: {getattr(event, 'price', '')}
+URL: {getattr(event, 'url', '')}"""
 
     def _get_embeddings(self, texts: List[str]) -> List[List[float]]:
         return self.model.encode(texts, normalize_embeddings=True).tolist()
@@ -135,28 +154,40 @@ class VectorEventRecommender:
 
     def index_events(self, events: List[Event]) -> None:
         if not events:
+            logger.warning("No events provided for indexing")
             return
         
         try:
+            logger.info(f"Processing {len(events)} events for indexing")
             texts = [self._get_event_text(event) for event in events]
+            logger.info("Generated event texts")
+            
             embeddings = self._get_embeddings(texts)
+            logger.info("Generated embeddings")
+            
             event_dicts = [{"event": self._event_to_dict(event)} for event in events]
+            logger.info("Created event dictionaries")
             
             # Create an embedding function that matches langchain's expected interface
             def embedding_function(text: str) -> List[float]:
                 return self._get_embeddings([text])[0]
             
             if self.vector_store is None:
+                logger.info("Creating new vector store")
                 self.vector_store = FAISS.from_embeddings(
                     text_embeddings=list(zip(texts, embeddings)),
                     embedding=embedding_function,  # Provide the embedding function
                     metadatas=event_dicts
                 )
+                logger.info("Vector store created successfully")
             else:
+                logger.info("Adding embeddings to existing vector store")
                 self.vector_store.add_embeddings(
                     text_embeddings=list(zip(texts, embeddings)),
                     metadatas=event_dicts
                 )
+                logger.info("Embeddings added successfully")
+            
             logger.info(f"Successfully indexed {len(events)} events")
 
             # Add initial interactions for each event
@@ -173,6 +204,13 @@ class VectorEventRecommender:
     def find_relevant_events(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
         """Find relevant events based on the query."""
         try:
+            logger.info(f"Finding relevant events for query: {query}")
+            
+            # Check if vector store exists
+            if self.vector_store is None:
+                logger.error("Vector store is None - no events have been indexed")
+                raise ValueError("No events have been indexed yet")
+            
             # Check cache first
             cache_key = f"{query}_{k}"
             if cache_key in self.cache:
@@ -181,11 +219,13 @@ class VectorEventRecommender:
                     logger.info("Returning cached results")
                     return cache_entry['results']
 
+            logger.info("Performing similarity search")
             # Get vector search results
             results = self.vector_store.similarity_search_with_score(
                 query,
                 k=k
             )
+            logger.info(f"Found {len(results)} results")
 
             # Process results
             processed_results = []
@@ -193,11 +233,43 @@ class VectorEventRecommender:
                 event_data = doc.metadata.get('event', {})
                 # Normalize score to be between 0 and 1
                 normalized_score = 1 / (1 + score)  # Convert distance to similarity score
+                
+                # Get personalization info
+                personalization = self._get_personalization_info(event_data)
+                
+                # Get recent context and preferences
+                recent_context = "\n".join([
+                    f"- {interaction['query']}"
+                    for interaction in self.conversation_memory.get_recent_history()
+                ])
+                user_preferences = self.conversation_memory.get_preferences_summary()
+                
+                # Format event data for the prompt
+                event_str = f"""Name: {event_data.get('name', '')}
+Description: {event_data.get('description', '')}
+Categories: {', '.join(event_data.get('categories', []))}
+Location: {event_data.get('location', '')}
+Date: {event_data.get('date', '')}
+Price: {event_data.get('price', '')}
+URL: {event_data.get('url', '')}"""
+                
+                # Get recommendation from LLM
+                prompt_args = {
+                    "recent_context": recent_context,
+                    "user_preferences": user_preferences,
+                    "query": query,
+                    "event": event_str,
+                    "format_instructions": self.output_parser.get_format_instructions()
+                }
+                
+                chain = self.prompt_template | self.llm | self.output_parser
+                recommendation = chain.invoke(prompt_args)
+                
                 processed_results.append({
                     'event': event_data,
                     'relevance_score': normalized_score,
-                    'reasoning': f"This event matches your query based on its {', '.join(event_data.get('categories', []))} content with a relevance score of {normalized_score:.2f}",
-                    'personalization': self._get_personalization_info(event_data)
+                    'reasoning': recommendation.reasoning,
+                    'personalization': recommendation.personalization
                 })
 
             # Update cache
@@ -235,11 +307,14 @@ class VectorEventRecommender:
 
             # Match interests with event
             matching_interests = []
-            event_text = f"{event_data.get('name', '')} {event_data.get('description', '')}".lower()
+            event_name = event_data.get('name', '').lower()
+            event_description = event_data.get('description', '').lower()
             event_categories = [cat.lower() for cat in event_data.get('categories', [])]
             
             for interest in interests:
-                if interest.lower() in event_text or interest.lower() in event_categories:
+                if (interest.lower() in event_name or 
+                    interest.lower() in event_description or 
+                    interest.lower() in event_categories):
                     matching_interests.append(interest)
 
             if matching_interests:

@@ -1,8 +1,10 @@
+import unittest
+from unittest.mock import patch, MagicMock
 import os
 import sys
 import json
 from dotenv import load_dotenv
-from event_apis import MeetupAPI
+from src.api.event_apis import MeetupAPI
 
 # Load environment variables
 load_dotenv()

@@ -54,43 +54,65 @@ def generate_event_suggestions(zip_code: str, interests: List[str]) -> str:
         logger.info("Fetching events from APIs...")
         events = get_all_events(zip_code, interests)
         
+        logger.info(f"Found {len(events)} events")
+        
         if not events:
             return "No events found matching your interests. Try adjusting your search criteria or zip code."
         
-        # Initialize vector recommender
-        recommender = VectorEventRecommender()
-        
-        # Get vector-based recommendations
-        logger.info("Getting vector-based recommendations...")
-        vector_results = recommender.find_relevant_events(interests)
-        
-        # Create a more detailed event summary with relevance scores
-        event_summary = "\n".join([
-            f"- {result['event_text']}\n  Relevance Score: {result['relevance_score']:.2f}\n  Matching Interests: {', '.join(result['matching_interests'])}"
-            for result in vector_results
-        ])
-        
-        # Create the prompt with the vector-based results
-        prompt = f"""Based on the following events and user interests, recommend the top 5 most relevant events.
-        Consider the user's interests: {', '.join(interests)}
-        
-        Available events with relevance scores:
-        {event_summary}
-        
-        Please provide recommendations in this format:
-        1. Event Name - Date and Venue
-           Why it matches your interests (based on relevance score)
-        2. Event Name - Date and Venue
-           Why it matches your interests (based on relevance score)
-        etc.
-        
-        If no events match the interests, say "No events found matching your interests."
-        """
-        
-        # Generate recommendations using the OpenAI model
-        logger.info("Generating final recommendations...")
-        response = llm.invoke(prompt)
-        return response.content
+        try:
+            # Initialize vector recommender
+            recommender = VectorEventRecommender(openai_key)
+            
+            # Index the events first
+            logger.info("Indexing events...")
+            recommender.index_events(events)
+            logger.info("Events indexed successfully")
+            
+            # Get vector-based recommendations
+            logger.info("Getting vector-based recommendations...")
+            query = " ".join(interests)  # Join interests into a single query string
+            vector_results = recommender.find_relevant_events(query)
+            
+            # Create a more detailed event summary with relevance scores
+            event_summary = "\n".join([
+                f"- {result['event']['name']}\n  Date: {result['event']['date']}\n  Location: {result['event']['location']}\n  Venue: {result['event']['venue']}\n  Price: {result['event']['price']}\n  Description: {result['event']['description']}\n  Categories: {', '.join(result['event']['categories'])}\n  Relevance Score: {result['relevance_score']:.2f}\n  {result['reasoning']}\n  {result['personalization']}"
+                for result in vector_results
+            ])
+            
+            # Create the prompt with the vector-based results
+            prompt = f"""Based on the following events and user interests, recommend the top 5 most relevant events.
+            Consider the user's interests: {', '.join(interests)}
+            
+            Available events with relevance scores:
+            {event_summary}
+            
+            Please provide recommendations in this format:
+            1. Event Name - Date and Venue
+               Why it matches your interests (based on relevance score)
+            2. Event Name - Date and Venue
+               Why it matches your interests (based on relevance score)
+            etc.
+            
+            If no events match the interests, say "No events found matching your interests."
+            """
+            
+            # Generate recommendations using the OpenAI model
+            logger.info("Generating final recommendations...")
+            response = llm.invoke(prompt)
+            return response.content
+            
+        except Exception as e:
+            logger.error(f"Error in vector-based recommendations: {str(e)}")
+            # Fallback to basic event list if vector recommendations fail
+            event_summary = "\n".join([
+                f"- {event.name}\n  Description: {event.description}\n  Categories: {', '.join(event.categories)}\n  Location: {event.location}\n  Date: {event.date}\n  Price: {event.price}"
+                for event in events[:5]  # Show top 5 events
+            ])
+            return f"""Here are some events that match your interests:
+
+{event_summary}
+
+Note: The recommendation system encountered an error, so these are basic matches without relevance scoring."""
         
     except Exception as e:
         logger.error(f"Error generating event suggestions: {str(e)}")
