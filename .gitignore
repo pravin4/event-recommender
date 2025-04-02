@@ -21,9 +21,10 @@ wheels/
 *.egg
 
 # Virtual Environment
+.venv/
 venv/
-env/
 ENV/
+env/
 
 # IDE
 .idea/
@@ -33,8 +34,6 @@ ENV/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
 
 # Logs
 *.log
@@ -42,5 +41,21 @@ ENV/
 # Cache
 .cache/
 .pytest_cache/
-.coverage
-htmlcov/ 
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg 
