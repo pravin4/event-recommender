@@ -116,6 +116,7 @@ class TicketmasterAPI(EventAPI):
             response.raise_for_status()
             data = response.json()
             logger.info("Successfully received response from Ticketmaster API")
+            logger.info(f"Raw API response: {json.dumps(data, indent=2)}")
 
             events = []
             for event in data.get("_embedded", {}).get("events", []):
@@ -125,10 +126,32 @@ class TicketmasterAPI(EventAPI):
                     location = f"{venue.get('address', {}).get('line1', '')}, {venue.get('city', {}).get('name', '')}"
 
                     # Extract price information
-                    price_ranges = event.get("priceRanges", [{}])[0]
-                    price = price_ranges.get("min", "N/A")
-                    if price != "N/A":
-                        price = f"${price}"
+                    logger.info(f"Processing event: {event.get('name')}")
+                    
+                    # Try to get prices from priceRanges
+                    price_ranges = event.get("priceRanges", [])
+                    if price_ranges:
+                        min_price = price_ranges[0].get("min")
+                        max_price = price_ranges[0].get("max")
+                        if min_price and max_price:
+                            # Always show the price range
+                            price = f"${min_price:.2f} - ${max_price:.2f}"
+                        elif min_price:
+                            # If we only have a minimum price, show "From $X"
+                            price = f"From ${min_price:.2f}"
+                        else:
+                            price = "Price not available"
+                    else:
+                        # Check if tickets are on sale
+                        sales = event.get("sales", {})
+                        public_sales = sales.get("public", {})
+                        if public_sales and public_sales.get("startDateTime"):
+                            # If tickets are on sale but we don't have price ranges, show "Price not available"
+                            price = "Price not available"
+                        else:
+                            price = "Tickets not yet on sale"
+                    
+                    logger.info(f"Final price set to: {price}")
 
                     # Extract categories
                     categories = []
@@ -138,10 +161,48 @@ class TicketmasterAPI(EventAPI):
                         if "genre" in classification:
                             categories.append(classification["genre"]["name"])
 
+                    # Get description from various possible fields, filtering out administrative content
+                    raw_description = (
+                        event.get("description") or 
+                        event.get("info") or 
+                        event.get("pleaseNote") or 
+                        ""
+                    )
+
+                    # Filter out administrative content and create a more engaging description
+                    if raw_description:
+                        # Common administrative keywords to filter out
+                        admin_keywords = [
+                            "bag policy", "bag check", "security", "prohibited items",
+                            "parking", "entry", "doors open", "re-entry", "refund",
+                            "camera policy", "recording", "smoking", "alcohol",
+                            "age restriction", "ID required", "ticket limit"
+                        ]
+                        
+                        # Check if the description contains administrative content
+                        is_admin_content = any(keyword.lower() in raw_description.lower() for keyword in admin_keywords)
+                        
+                        if is_admin_content:
+                            # Create a more engaging description based on event details
+                            description = (
+                                f"Experience {event.get('name', 'this exciting event')} at {venue.get('name', 'this venue')}! "
+                                f"This {', '.join(categories) if categories else 'event'} promises to be an unforgettable experience. "
+                                f"Join us in {location} for an evening of entertainment and excitement."
+                            )
+                        else:
+                            description = raw_description
+                    else:
+                        # Create a default engaging description
+                        description = (
+                            f"Join us for {event.get('name', 'this event')} at {venue.get('name', 'this venue')}! "
+                            f"Experience an exciting {', '.join(categories) if categories else 'event'} in {location}. "
+                            f"Don't miss out on this incredible opportunity to be part of the action!"
+                        )
+
                     # Create event object
                     event_obj = Event(
                         name=event.get("name", "Untitled Event"),
-                        description=event.get("description", event.get("info", "No description available")),
+                        description=description,
                         date=event.get("dates", {}).get("start", {}).get("localDate", "N/A"),
                         location=location,
                         zip_code=venue.get("postalCode", "00000"),  # Default zip code if not available
@@ -155,17 +216,16 @@ class TicketmasterAPI(EventAPI):
                     if not interests:
                         events.append(event_obj)
                     else:
-                        # Check if event matches any interests
+                        # Check if event matches any interests (OR condition)
                         event_name = event_obj.name.lower()
                         event_description = event_obj.description.lower()
                         event_categories = [cat.lower() for cat in event_obj.categories]
                         
-                        if any(
-                            interest.lower() in event_name or
-                            interest.lower() in event_description or
-                            interest.lower() in event_categories
-                            for interest in interests
-                        ):
+                        # Create a combined text to search in
+                        event_text = f"{event_name} {event_description} {' '.join(event_categories)}".lower()
+                        
+                        # Check if any interest matches (OR condition)
+                        if any(interest.lower() in event_text for interest in interests):
                             events.append(event_obj)
 
                 except Exception as e:
@@ -290,7 +350,7 @@ class MeetupAPI(EventAPI):
                     if not interests:
                         events.append(event_obj)
                     else:
-                        # Check if event matches any interests
+                        # Check if event matches any interests (OR condition)
                         event_text = f"{event_obj.name} {event_obj.description} {' '.join(event_obj.categories)}".lower()
                         if any(interest.lower() in event_text for interest in interests):
                             events.append(event_obj)
@@ -429,7 +489,7 @@ class VividSeatsAPI(EventAPI):
                     if not interests:
                         events.append(event_obj)
                     else:
-                        # Check if event matches any interests
+                        # Check if event matches any interests (OR condition)
                         event_text = f"{event_obj.name} {event_obj.description} {' '.join(event_obj.categories)}".lower()
                         if any(interest.lower() in event_text for interest in interests):
                             events.append(event_obj)
@@ -491,10 +551,11 @@ class EventAggregator:
         
         return all_events
 
-def get_all_events(zip_code: str, interests: List[str]) -> List[Event]:
-    """Get events from all available APIs."""
-    logger.info(f"Getting events for zip code {zip_code} with interests {interests}")
+def get_all_events(zip_code: str, interests: Optional[List[str]] = None) -> List[Event]:
+    """Get events from all available APIs"""
+    logger.info(f"Getting events for zip code {zip_code}")
     aggregator = EventAggregator()
-    events = aggregator.get_all_events(zip_code, interests)
+    # Ignore interests and get all events
+    events = aggregator.get_all_events(zip_code, [])
     logger.info(f"Total events found: {len(events)}")
     return events 

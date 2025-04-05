@@ -201,7 +201,7 @@ URL: {getattr(event, 'url', '')}"""
             logger.error(f"Error indexing events: {str(e)}")
             raise
 
-    def find_relevant_events(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
+    def find_relevant_events(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
         """Find relevant events based on the query."""
         try:
             logger.info(f"Finding relevant events for query: {query}")
@@ -227,10 +227,20 @@ URL: {getattr(event, 'url', '')}"""
             )
             logger.info(f"Found {len(results)} results")
 
-            # Process results
+            # Process results and remove duplicates
             processed_results = []
+            seen_events = set()
+            
             for doc, score in results:
                 event_data = doc.metadata.get('event', {})
+                # Create a unique key for the event using name, date, and venue
+                event_key = f"{event_data.get('name', '')}_{event_data.get('date', '')}_{event_data.get('venue', '')}"
+                
+                # Skip if we've already seen this event
+                if event_key in seen_events:
+                    continue
+                seen_events.add(event_key)
+                
                 # Normalize score to be between 0 and 1
                 normalized_score = 1 / (1 + score)  # Convert distance to similarity score
                 

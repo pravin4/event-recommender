@@ -52,12 +52,12 @@ def generate_event_suggestions(zip_code: str, interests: List[str]) -> str:
         
         # Fetch real events from various APIs
         logger.info("Fetching events from APIs...")
-        events = get_all_events(zip_code, interests)
+        events = get_all_events(zip_code, [])  # Pass empty list for interests
         
         logger.info(f"Found {len(events)} events")
         
         if not events:
-            return "No events found matching your interests. Try adjusting your search criteria or zip code."
+            return "No events found in your area. Try adjusting your zip code."
         
         try:
             # Initialize vector recommender
@@ -70,30 +70,50 @@ def generate_event_suggestions(zip_code: str, interests: List[str]) -> str:
             
             # Get vector-based recommendations
             logger.info("Getting vector-based recommendations...")
-            query = " ".join(interests)  # Join interests into a single query string
-            vector_results = recommender.find_relevant_events(query)
+            # Get recommendations for each interest separately
+            all_vector_results = []
+            for interest in interests:
+                vector_results = recommender.find_relevant_events(interest, k=5)  # Get 5 events per interest
+                all_vector_results.extend(vector_results)
+            
+            # Remove duplicate events based on name, date, and venue
+            seen_events = set()
+            unique_results = []
+            for result in all_vector_results:
+                event_key = f"{result['event']['name']}_{result['event']['date']}_{result['event']['venue']}"
+                if event_key not in seen_events:
+                    seen_events.add(event_key)
+                    unique_results.append(result)
+            
+            # Sort by relevance score and take top 10
+            unique_results.sort(key=lambda x: x['relevance_score'], reverse=True)
+            unique_results = unique_results[:10]
             
             # Create a more detailed event summary with relevance scores
             event_summary = "\n".join([
                 f"- {result['event']['name']}\n  Date: {result['event']['date']}\n  Location: {result['event']['location']}\n  Venue: {result['event']['venue']}\n  Price: {result['event']['price']}\n  Description: {result['event']['description']}\n  Categories: {', '.join(result['event']['categories'])}\n  Relevance Score: {result['relevance_score']:.2f}\n  {result['reasoning']}\n  {result['personalization']}"
-                for result in vector_results
+                for result in unique_results
             ])
             
             # Create the prompt with the vector-based results
-            prompt = f"""Based on the following events and user interests, recommend the top 5 most relevant events.
-            Consider the user's interests: {', '.join(interests)}
+            prompt = f"""Based on the following events, recommend the top 10 most relevant events.
+            The user is interested in: {', '.join(interests)}
             
             Available events with relevance scores:
             {event_summary}
             
             Please provide recommendations in this format:
             1. Event Name - Date and Venue
-               Why it matches your interests (based on relevance score)
+               Reasoning: Why this event might be interesting
             2. Event Name - Date and Venue
-               Why it matches your interests (based on relevance score)
+               Reasoning: Why this event might be interesting
             etc.
             
-            If no events match the interests, say "No events found matching your interests."
+            Important rules:
+            - Do not include duplicate events (same name, date, and venue)
+            - Include a balanced mix of events matching different interests
+            - Include at least 5 events if available
+            - If no events are available, say "No events found in your area."
             """
             
             # Generate recommendations using the OpenAI model
