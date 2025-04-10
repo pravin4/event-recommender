@@ -1,91 +1,106 @@
-# Event Recommendation System
+# Event Recommendations Application
 
-This application provides personalized event recommendations based on user interests and location. It aggregates events from multiple sources including Ticketmaster, SeatGeek, Meetup, and Vivid Seats.
+A modern web application that helps users discover local events based on their interests and location.
 
 ## Features
 
-- Fetches real-time events from multiple sources
-- Personalized recommendations based on user interests
-- Includes event details like dates, locations, prices, and ticket links
-- Supports various event categories (art, sports, music, theater, etc.)
+- **Location-based Search**: Automatically detects user's location or accepts zip code input
+- **Interest-based Recommendations**: Finds events matching user's interests
+- **Multiple Event Sources**: Aggregates events from various APIs (Ticketmaster, Meetup, SeatGeek, VividSeats)
+- **Personalized Results**: Uses vector-based similarity search to find relevant events
+- **Modern UI**: Clean, responsive design with Tailwind CSS
+- **Real-time Updates**: Shows loading states and error handling
 
-## Project Structure
+## Limitations
 
-```
-event-recommendation-system/
-├── src/                    # Source code
-│   ├── api/                # API clients
-│   │   ├── __init__.py
-│   │   └── event_apis.py   # Event API implementations
-│   ├── utils/              # Utility functions
-│   │   └── __init__.py
-│   ├── templates/          # HTML templates
-│   ├── __init__.py
-│   ├── app.py              # Flask application
-│   └── init.py             # Event recommendation logic
-├── tests/                  # Test files
-│   ├── __init__.py
-│   ├── test_apis.py
-│   ├── test_ticketmaster.py
-│   └── ...
-├── frontend/               # Frontend application
-├── extension/              # Browser extension
-├── .env                    # Environment variables
-├── docker-compose.yml      # Docker Compose configuration
-├── Dockerfile              # Backend Dockerfile
-├── main.py                 # Application entry point
-├── Procfile                # Procfile for deployment
-└── README.md               # Project documentation
-```
+- Currently returns a maximum of 10 recommendations per search
+- Requires API keys for event sources (Ticketmaster, Meetup, etc.)
+- Limited to events within 50 miles of the specified location
+- Events are filtered for the next 30 days only
 
-## Setup
+## UI Description
+
+The application features a clean, modern interface with the following components:
+
+1. **Main Layout**
+   - Light gray background
+   - Centered content with proper padding
+   - Responsive design that works on all screen sizes
+
+2. **Header**
+   - Large, bold "Event Recommendations" title
+   - Centered at the top of the page
+
+3. **Search Form**
+   - White card with shadow
+   - Two input fields:
+     - Zip code input with auto-detection
+     - Interests input (comma-separated)
+   - Blue "Get Recommendations" button
+   - Loading spinner during API calls
+
+4. **Recommendations Grid**
+   - Responsive grid layout (1 column on mobile, 2 on tablet, 3 on desktop)
+   - White event cards with rounded corners
+   - Hover effects for better interactivity
+
+5. **Event Cards**
+   - Event title and description
+   - Icons for date, venue, and price
+   - Relevance score with star icon
+   - Category tags with deduplication
+   - "Get Tickets" button when available
+   - Clean typography and spacing
+
+## Technical Stack
+
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Backend**: Python + Flask
+- **APIs**: Ticketmaster, Meetup, SeatGeek, VividSeats
+- **Vector Search**: OpenAI embeddings for semantic matching
+
+## Setup Instructions
 
 1. Clone the repository
 2. Install dependencies:
    ```bash
+   # Backend
    pip install -r requirements.txt
+   
+   # Frontend
+   cd frontend
+   npm install
    ```
 
-3. Create a `.env` file in the root directory with your API keys:
+3. Set up environment variables:
+   - Create a `.env` file in the root directory
+   - Add required API keys:
+     ```
+     OPENAI_API_KEY=your_key
+     TICKETMASTER_API_KEY=your_key
+     MEETUP_API_KEY=your_key
+     SEATGEEK_API_KEY=your_key
+     VIVIDSEATS_API_KEY=your_key
+     ```
+
+4. Start the servers:
+   ```bash
+   # Backend
+   python src/app.py
+   
+   # Frontend
+   cd frontend
+   npm run dev
    ```
-   OPENAI_API_KEY=your_openai_api_key
-   TICKETMASTER_API_KEY=your_ticketmaster_api_key
-   SEATGEEK_API_KEY=your_seatgeek_api_key
-   MEETUP_API_KEY=your_meetup_api_key
-   VIVIDSEATS_API_KEY=your_vividseats_api_key
-   GITHUB_TOKEN=your_github_token
-   ```
 
-   You can obtain API keys from:
-   - OpenAI: https://platform.openai.com/api-keys
-   - Ticketmaster: https://developer.ticketmaster.com/
-   - SeatGeek: https://seatgeek.com/account/develop
-   - Meetup: https://www.meetup.com/api/oauth/
-   - Vivid Seats: https://skybox.vividseats.com/api-docs/#/
-   - GitHub: https://github.com/settings/tokens (needed for API rate limits)
+## API Endpoints
 
-## Usage
+- `GET /api/recommendations`
+  - Parameters:
+    - `zip_code`: User's location
+    - `interests`: List of interests
+  - Returns: List of up to 3 event recommendations
 
-Run the main script:
-```bash
-python main.py
-```
+## Contributing
 
-Or using Docker Compose:
-```bash
-docker-compose up
-```
-
-The application will:
-1. Fetch events from all configured APIs
-2. Filter events based on user interests
-3. Generate personalized recommendations using OpenAI's GPT model
-4. Display the top 3 recommended events with detailed information
-
-## Customization
-
-You can modify the interests list and zip code in the `main()` function of `src/init.py` to get recommendations for different locations and interests.
-
-## Note
-
-Make sure to keep your API keys secure and never commit them to version control. The `.env` file is included in `.gitignore` to prevent accidental commits of sensitive data. 
+Feel free to submit issues and enhancement requests! 

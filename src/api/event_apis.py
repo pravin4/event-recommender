@@ -124,11 +124,51 @@ class TicketmasterAPI(EventAPI):
                     venue = event.get("_embedded", {}).get("venues", [{}])[0]
                     location = f"{venue.get('address', {}).get('line1', '')}, {venue.get('city', {}).get('name', '')}"
 
-                    # Extract price information
-                    price_ranges = event.get("priceRanges", [{}])[0]
-                    price = price_ranges.get("min", "N/A")
-                    if price != "N/A":
-                        price = f"${price}"
+                    # Extract price information with better fallback handling
+                    price = "N/A"
+                    if "priceRanges" in event:
+                        price_ranges = event["priceRanges"]
+                        if price_ranges:
+                            min_price = price_ranges[0].get("min")
+                            max_price = price_ranges[0].get("max")
+                            if min_price is not None and max_price is not None:
+                                if min_price == max_price:
+                                    price = f"${min_price:.2f}"
+                                else:
+                                    price = f"${min_price:.2f} - ${max_price:.2f}"
+                            elif min_price is not None:
+                                price = f"Starting at ${min_price:.2f}"
+                            elif max_price is not None:
+                                price = f"Up to ${max_price:.2f}"
+                    elif event.get("dates", {}).get("status", {}).get("code") == "onsale":
+                        price = "Tickets Available"
+                    elif event.get("dates", {}).get("status", {}).get("code") == "offsale":
+                        price = "Sold Out"
+                    elif event.get("free", False):
+                        price = "Free"
+
+                    # Extract description with better fallback handling
+                    description = event.get("description")
+                    if not description:
+                        description = event.get("info")
+                    if not description:
+                        description = event.get("pleaseNote")
+                    if not description:
+                        # Build a description from available data
+                        parts = []
+                        if event.get("name"):
+                            parts.append(event["name"])
+                        if event.get("type"):
+                            parts.append(f"Type: {event['type']}")
+                        if event.get("classifications"):
+                            genre = next((c["genre"]["name"] for c in event["classifications"] if "genre" in c), None)
+                            if genre:
+                                parts.append(f"Genre: {genre}")
+                        if event.get("dates", {}).get("start", {}).get("localTime"):
+                            parts.append(f"Time: {event['dates']['start']['localTime']}")
+                        if venue.get("name"):
+                            parts.append(f"Venue: {venue['name']}")
+                        description = " | ".join(parts) if parts else "No description available"
 
                     # Extract categories
                     categories = []
@@ -137,11 +177,13 @@ class TicketmasterAPI(EventAPI):
                             categories.append(classification["segment"]["name"])
                         if "genre" in classification:
                             categories.append(classification["genre"]["name"])
+                        if "subGenre" in classification:
+                            categories.append(classification["subGenre"]["name"])
 
                     # Create event object
                     event_obj = Event(
                         name=event.get("name", "Untitled Event"),
-                        description=event.get("description", event.get("info", "No description available")),
+                        description=description,
                         date=event.get("dates", {}).get("start", {}).get("localDate", "N/A"),
                         location=location,
                         zip_code=venue.get("postalCode", "00000"),  # Default zip code if not available
@@ -448,46 +490,51 @@ class VividSeatsAPI(EventAPI):
 
 class EventAggregator:
     def __init__(self):
-        logger.info("Initializing EventAggregator")
-        # Initialize APIs dictionary with Ticketmaster as the default
-        self.apis = {
-            "ticketmaster": TicketmasterAPI(os.getenv("TICKETMASTER_API_KEY", ""))
-        }
-        logger.info("Initialized Ticketmaster API")
+        self.apis = {}
+        self._initialize_apis()
         
-        # Add VividSeats API if key is available
+    def _initialize_apis(self):
+        """Initialize all available event APIs"""
+        # Initialize Ticketmaster API if key is available
+        ticketmaster_key = os.getenv("TICKETMASTER_API_KEY")
+        if ticketmaster_key:
+            self.apis["Ticketmaster"] = TicketmasterAPI(ticketmaster_key)
+        
+        # Initialize Meetup API if key is available
+        meetup_key = os.getenv("MEETUP_API_KEY")
+        if meetup_key:
+            self.apis["Meetup"] = MeetupAPI(meetup_key)
+        
+        # Initialize Vivid Seats API if key is available
         vividseats_key = os.getenv("VIVIDSEATS_API_KEY")
-        if vividseats_key and vividseats_key != "your_vividseats_api_key":
-            self.apis["vividseats"] = VividSeatsAPI(vividseats_key)
-            logger.info("Initialized VividSeats API")
-            
-        # Add SeatGeek API if both client ID and secret are available
-        seatgeek_client_id = os.getenv("SEATGEEK_CLIENT_ID")
-        seatgeek_client_secret = os.getenv("SEATGEEK_CLIENT_SECRET")
-        if (seatgeek_client_id and seatgeek_client_id != "your_client_id" and 
-            seatgeek_client_secret and seatgeek_client_secret != "your_client_secret"):
-            self.apis["seatgeek"] = SeatGeekAPI(seatgeek_client_id)
-            logger.info("Initialized SeatGeek API")
-        
-        logger.info(f"Available APIs: {list(self.apis.keys())}")
-
+        if vividseats_key:
+            self.apis["Vivid Seats"] = VividSeatsAPI(vividseats_key)
+    
     def get_all_events(self, zip_code: str, interests: List[str]) -> List[Event]:
         """Aggregate events from all available sources"""
         all_events = []
+        seen_events = set()  # Track unique events by name and date
         
         for api_name, api in self.apis.items():
             try:
                 logger.info(f"Fetching events from {api_name}...")
                 events = api.fetch_events(zip_code, interests)
                 logger.info(f"Found {len(events)} events from {api_name}")
-                all_events.extend(events)
+                
+                # Add only unique events
+                for event in events:
+                    event_key = f"{event.name}_{event.date}_{event.venue}"
+                    if event_key not in seen_events:
+                        seen_events.add(event_key)
+                        all_events.append(event)
+                
             except Exception as e:
                 logger.error(f"Error fetching events from {api_name}: {e}")
                 continue
         
         # Sort events by date
         all_events.sort(key=lambda x: x.date)
-        logger.info(f"Total events found across all APIs: {len(all_events)}")
+        logger.info(f"Total unique events found across all APIs: {len(all_events)}")
         
         return all_events
 

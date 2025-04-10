@@ -201,7 +201,7 @@ URL: {getattr(event, 'url', '')}"""
             logger.error(f"Error indexing events: {str(e)}")
             raise
 
-    def find_relevant_events(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
+    def find_relevant_events(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
         """Find relevant events based on the query."""
         try:
             logger.info(f"Finding relevant events for query: {query}")

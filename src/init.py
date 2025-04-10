@@ -1,7 +1,7 @@
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from typing import List, Dict
+from typing import List, Dict, Any
 import json
 from datetime import datetime, timedelta
 from src.api.event_apis import get_all_events, Event
@@ -36,7 +36,7 @@ Please summarize and recommend the top 3 events that match the user's interests.
 """
 )
 
-def generate_event_suggestions(zip_code: str, interests: List[str]) -> str:
+def generate_event_suggestions(zip_code: str, interests: List[str]) -> List[Dict[str, Any]]:
     # Check if OpenAI key is set
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
@@ -57,7 +57,7 @@ def generate_event_suggestions(zip_code: str, interests: List[str]) -> str:
         logger.info(f"Found {len(events)} events")
         
         if not events:
-            return "No events found matching your interests. Try adjusting your search criteria or zip code."
+            return []
         
         try:
             # Initialize vector recommender
@@ -73,50 +73,55 @@ def generate_event_suggestions(zip_code: str, interests: List[str]) -> str:
             query = " ".join(interests)  # Join interests into a single query string
             vector_results = recommender.find_relevant_events(query)
             
-            # Create a more detailed event summary with relevance scores
-            event_summary = "\n".join([
-                f"- {result['event']['name']}\n  Date: {result['event']['date']}\n  Location: {result['event']['location']}\n  Venue: {result['event']['venue']}\n  Price: {result['event']['price']}\n  Description: {result['event']['description']}\n  Categories: {', '.join(result['event']['categories'])}\n  Relevance Score: {result['relevance_score']:.2f}\n  {result['reasoning']}\n  {result['personalization']}"
-                for result in vector_results
-            ])
+            # Convert results to a list of dictionaries
+            recommendations = []
+            for result in vector_results:
+                event = result['event']
+                recommendations.append({
+                    'title': event['name'],
+                    'description': event['description'],
+                    'categories': event['categories'],
+                    'location': event['location'],
+                    'date': event['date'],
+                    'price': event['price'],
+                    'url': event.get('url', 'N/A'),
+                    'relevance_score': result['relevance_score'],
+                    'reasoning': result['reasoning'],
+                    'personalization': result['personalization']
+                })
             
-            # Create the prompt with the vector-based results
-            prompt = f"""Based on the following events and user interests, recommend the top 5 most relevant events.
-            Consider the user's interests: {', '.join(interests)}
-            
-            Available events with relevance scores:
-            {event_summary}
-            
-            Please provide recommendations in this format:
-            1. Event Name - Date and Venue
-               Why it matches your interests (based on relevance score)
-            2. Event Name - Date and Venue
-               Why it matches your interests (based on relevance score)
-            etc.
-            
-            If no events match the interests, say "No events found matching your interests."
-            """
-            
-            # Generate recommendations using the OpenAI model
-            logger.info("Generating final recommendations...")
-            response = llm.invoke(prompt)
-            return response.content
+            return recommendations
             
         except Exception as e:
             logger.error(f"Error in vector-based recommendations: {str(e)}")
             # Fallback to basic event list if vector recommendations fail
-            event_summary = "\n".join([
-                f"- {event.name}\n  Description: {event.description}\n  Categories: {', '.join(event.categories)}\n  Location: {event.location}\n  Date: {event.date}\n  Price: {event.price}"
-                for event in events[:5]  # Show top 5 events
-            ])
-            return f"""Here are some events that match your interests:
-
-{event_summary}
-
-Note: The recommendation system encountered an error, so these are basic matches without relevance scoring."""
+            # Use a set to track unique event names
+            seen_events = set()
+            unique_events = []
+            
+            for event in events:
+                if event.name not in seen_events:
+                    seen_events.add(event.name)
+                    unique_events.append(event)
+            
+            # Convert events to a list of dictionaries
+            recommendations = []
+            for event in unique_events[:5]:  # Show top 5 unique events
+                recommendations.append({
+                    'title': event.name,
+                    'description': event.description,
+                    'categories': event.categories,
+                    'location': event.location,
+                    'date': event.date,
+                    'price': event.price,
+                    'url': getattr(event, 'url', 'N/A')
+                })
+            
+            return recommendations
         
     except Exception as e:
         logger.error(f"Error generating event suggestions: {str(e)}")
-        return f"Error generating recommendations: {str(e)}"
+        return []
 
 # Example usage
 def main():
